@@ -21,6 +21,12 @@
 # RStudio files
 .Rproj.user/
 
+# Quarto files
+.quarto
+
+# Targets files
+_targets*
+
 # produced vignettes
 vignettes/*.html
 vignettes/*.pdf

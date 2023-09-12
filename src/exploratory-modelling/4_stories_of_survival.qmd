@@ -1,0 +1,119 @@
+---
+format: html-eval-false
+---
+
+::: {.content-visible when-format="html-eval-false"}
+```{r}
+library(targets)
+tar_load(c_titanic)
+tar_load(titanic_bn3)
+```
+:::
+
+# Stories of survival
+
+Surviving the sinking of the Titanic may have involved a bit.
+
+The trained Bayesian Network can be used to explore relationships between variables in the Titanic data set and gain insight into surviving the catastrophe. One novel way of doing this is through fictitious or hypothetical stories.
+
+You are a young mother aged 34 with two children, one girl aged 3 and one boy aged 8. You are travelling with your two children, your mother and your older brother. Your mother and brother are in adjacent cabins. After a long day looking after your children and socializing you are woken from a heavy sleep by your kids and a knock on the door. You open the door and it is your mother and brother standing in the corridor with other passengers. Your mother looks concerned, your brother is calm. You are told to get the kids and muster. Something has happened. As a group of five you all pile into the corridors along with other passengers and head to the muster point. An hour or so has passed waiting at the muster point, people are calling all mothers with young children to get on one of the lifeboats. Your only allowed to take your daughter on the lifeboat. What do you do? Your choice determines whether you survive or not. Most mothers chose to get on the lifeboat with their child.
+
+```{r}
+#| eval: false
+#set.seed(1)
+bnlearn::cpquery(titanic_bn3$fitted,
+        event = (survived == "Yes"),
+        evidence = (sex == "female"
+                    & age >= 30
+                    & age < 40
+                    & parch == "3"
+                    & sibsp == "1"))
+```
+
+You are an elderly male aged 64 years. You are travelling alone. You boarded the Titanic at Southampton looking to catch-up with family that are already in the United States of America (USA). After dining at the captains table you settle into your cabin on deck B and fall asleep. At just before midnight you are suddenly awoken. What the ... About five minutes later the captain tells everyone to muster. Unfortunately you don't get on a lifeboat, you don't get to see your family in the USA. You don't survive. 
+
+```{r}
+#| eval: false
+#set.seed(1)
+bnlearn::cpquery(titanic_bn3$fitted,
+        event = (survived == "Yes"),
+        evidence = (sex == "male"
+                    & age > 60
+                    & embarked == "Southampton"
+                    & group_class == "Alone"))
+```
+
+You are a young adult male aged 21 years. You are travelling alone. You boarded the Titanic at Queenstown looking to emigrate to the United States of America (USA) to start a new life. You have little money and spent little on the fare. Unfortunately you never make it to the USA. Somehow you manage to survive, barely. The odds are against you, a 1 in 10 chance.
+
+```{r}
+#| eval: false
+#set.seed(1)
+bnlearn::cpquery(titanic_bn3$fitted,
+        event = (survived == "Yes"),
+        evidence = (sex == "male"
+                    & age > 18
+                    & age < 25
+                    & embarked == "Queenstown"
+                    & group_class == "Alone"
+                    & fare < 5))
+```
+
+You are a young adult female aged 25 years. You just got married. You are travelling with your husband aged 27 years. You boarded the Titanic at Cherbourg in France for the trip of a life time. You have been looking forward to spending time with your husband exploring the USA for 2 months while on honeymoon. You have been partying with your husband, had some drinks in the bar till late at night. You are still in the bar listening to music and drinking beer. Your husband looks at you - What was that? The engines stopped. It is just before midnight. There is some commotion going on and talk of an iceberg hitting the ship. Nope, it's all good, the crew has got this, the ship could not possibly hit an iceberg. You continue enjoying your drink. After sometime the crew tells you and your husband that you must muster. You ignore their directions. An hour or two passes and you hear people saying abandon ship, abandon ship. You and your husband dismiss it. That was your mistake. Unfortunately you did not get to enjoy your honeymoon. You did not survive. You could have survived if only you followed instructions, maybe. The modelling suggest that a young adult female travelling with one other has a moderate chance of survival. Your partner on the other hand, may not have survived. His chances of survival were lower than yours.
+
+```{r}
+#| eval: false
+#set.seed(1)
+bnlearn::cpquery(titanic_bn3$fitted,
+        event = (survived == "Yes"),
+        evidence = (sex == "female"
+                    & age > 22
+                    & age < 29
+                    & embarked == "Cherbourg"
+                    & parch == "2"
+                    & sibsp == "0"))
+```
+
+```{r}
+#| eval: false
+#set.seed(1)
+bnlearn::cpquery(titanic_bn3$fitted,
+        event = (survived == "Yes"),
+        evidence = (sex == "male"
+                    & age > 22
+                    & age < 29
+                    & embarked == "Cherbourg"
+                    & parch == "2"
+                    & sibsp == "0"))
+```
+
+This last story highlights deficiencies in the preparation of the data. It is not easy to determine what the probability is of a couple or an entire group with a certain composition surviving using the data as it is. For example to determine if a group consisting of a mother and child would require selecting observations where (sex == "female" and n_adult == 1 and n_child+n_infant == 1) or (n_adult == 1 and n_child+n_infant == 1). But this would also select children where the parent was male. However, the tickets data could be used. For this, the preparation of the tickets data would require the inclusion of the number of survivors in the group and that there are no missing values for survived.
+
+```{r}
+#| output: false
+#| warning: false
+#| message: false
+
+flds <- names(titanic_bn3$fitted)
+df <- impute(titanic_bn3$fitted,
+             c_titanic[, flds],
+             method = "parents")
+df$ticket <- c_titanic$ticket
+df$survived <- ifelse(df$survived == "Yes", 1, 0)
+df$sex <- ifelse(df$sex == "male", 1, 0)
+df <-  df %>%
+  group_by(ticket) %>%
+  summarize(n_survived = sum(survived),
+            couple = n() == 2 & sum(sex) == 1,
+            family = n() > 1 & (n_child+n_infant)>0,
+            group_size = n()) %>%
+  mutate(all_survived = n_survived == group_size)
+
+couples_survived <- {
+  x <- sum(df$couple == TRUE & df$all_survived == TRUE)
+  y <- sum(df$couple == TRUE)
+  x / y * 100
+}
+couples_survived <- round(couples_survived, 1)
+```
+
+Based on the predictions from the Bayesian Network, only `r couples_survived`% of the couples survived the catastrophe.

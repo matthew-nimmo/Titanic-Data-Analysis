@@ -1,0 +1,69 @@
+---
+format: html-eval-false
+---
+
+::: {.content-visible when-format="html-eval-false"}
+```{r}
+library(tidyverse)
+library(readr)
+library(bnlearn)
+library(ggdag)
+library(ggthemes)
+library(ggmosaic)
+library(patchwork)
+library(SEMgraph)
+library(targets)
+
+source("src/exploratory-modelling/plot_bn.R")
+source("src/exploratory-modelling/add_percent_label.R")
+```
+:::
+
+# Final Bayesian Network
+
+The final Bayesian Network for this project is trained on the `c_titanic` data with latent variables added. The model is based on the directed acyclic graph defined in @fig-dag.
+
+The term "final" in this context is used to identify the last Bayesian Network for this Titanic data analysis project trained on the processed data. Final is not meant to suggest that it is the best and final model that could be trained and that there are no more improvements that could be made. Unfortunately, the term "final" does invoke the perception that there is no continuous improvement or continuous development. Data analytics projects are continuous improvement projects with no "final" model. This "final" model could be further improved.
+
+```{targets titanic_bn_final}
+#| label: titanic_bn_final
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+dag <- "[survived][parch|LV1][sibsp|LV1][group_size|sibsp:parch:group_class][age|LV2:age_class][sex|LV2][title|sex:age_class][pclass|deck:LV3][deck|LV3][group_class|LV3][LV1|group_class:survived][LV2|survived][LV3|survived][age_class]"
+
+dag <- "[survived|LV1:LV2:LV3][parch|LV1][sibsp|LV1][group_size|sibsp:parch:group_class][age|LV2:age_class][sex|LV2][title|sex:age_class][pclass|deck:LV3][deck|LV3][group_class|LV3][LV1|group_class][LV2][LV3][age_class]"
+dag <- model2network(dag)
+
+x <- c_titanic
+x$LV1 <- titanic_bn_lv1$imputed$LV1
+x$LV2 <- titanic_bn_lv2$imputed$LV2
+x$LV3 <- titanic_bn_lv3$imputed$LV3
+bn <- bn.fit(dag,
+             x[, nodes(dag)],
+             replace.unidentifiable = TRUE)
+bn
+```
+
+Build the "final" Bayesian Network `titanic_bn_final` and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn_final)
+```
+
+The final Bayesian Network is illustrated as a directed acyclic graph in @fig-bn-final (same as @fig-dag).
+
+```{r}
+#| fig.width: 4
+#| fig.height: 4
+#| label: fig-bn-final
+#| fig-cap: "Bayesian Network (FINAL)."
+plot_bn(titanic_bn_final, "gem", highlight="survived")
+```

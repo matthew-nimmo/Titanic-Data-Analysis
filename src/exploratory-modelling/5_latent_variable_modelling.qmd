@@ -1,0 +1,355 @@
+---
+format: html-eval-false
+---
+
+::: {.content-visible when-format="html-eval-false"}
+```{r}
+library(tidyverse)
+library(readr)
+library(bnlearn)
+library(ggdag)
+library(ggthemes)
+library(ggmosaic)
+library(patchwork)
+library(SEMgraph)
+library(targets)
+
+source("src/exploratory-modelling/plot_bn.R")
+source("src/exploratory-modelling/add_percent_label.R")
+```
+
+```{r}
+tar_load(c_titanic)
+```
+:::
+
+# Add latent variables to simplify Bayesian Network
+
+A latent variable, is a variable that has no values, it is unobserved. A latent variable maybe inferred from the data or defined from expert knowledge of the causal effects. The latent variable can be discrete or continuous.
+
+Bayesian Networks can model both discrete and continuous latent variables by including a variable in the training data that has no values and is of the desired type. Latent variables in Bayesian Networks can be used to model non-linear relationships and non-Gaussian distributions. A Gaussian Mixture model is a good latent variable model that can be used for this purpose.
+
+For the Titanic data set, three latent variables are inferred from the relationships between the variables. Latent Variable 1 is connected to survived, parch, sibsp, and group_class and represents group composition (family). Latent Variable 2 is connected to survived, age, age_class, and sex and represents individual characteristics, albeit limited. Latent Variable 3 is connected to survived, deck, passenger class, and group_class and represents the proximity of the passengers cabin to the life boats (closer to the boats = closer to getting on the boats <- front of the queue). The directed acyclic graph of the proposed Bayesian Network with latent variables is shown in @fig-dag.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 4
+#| label: fig-dag
+#| fig-cap: "Directed Acyclic Graph showing the connections of the three latent variables with Titanic data variables."
+dag <- dagify(
+  survived ~ LV1 + LV2 + LV3,
+  parch ~ LV1,
+  sibsp ~ LV1,
+  group_size ~ sibsp + parch + group_class,
+  LV1 ~ group_class,
+
+  age ~ LV2 + age_class,
+  sex ~ LV2,
+  title ~ sex + age_class,
+  LV2 ~ age_class,
+
+  pclass ~ deck + LV3,
+  deck ~ LV3,
+  group_class ~ LV3,
+
+  n_cabins ~ group_class,
+  fare ~ embarked + n_cabins + group_class + pclass
+)
+
+dag %>%
+  tidy_dagitty(layout="gem", seed=1) %>%
+  ggplot(aes(x=x, y=y, xend=xend, yend=yend)) +
+  geom_dag_edges(aes(start_cap=ggraph::circle(3,"mm"), end_cap=ggraph::circle(3,"mm")),
+                          edge_colour="grey70", edge_width=0.2) +
+  geom_dag_text(colour="black", size=4) +
+  theme_dag() +
+  theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm"))
+```
+
+## Latent Variable 1 (LV1)
+
+A Bayesian Network (`titanic_bn_lv1`) was trained using the variables survived, sibsp, parch, group_size, and group_class and a single discrete latent variable LV1. The latent variable 1 is assumed to have seven distinct levels or groups. A whitelist and blacklist was used to constrain the connections between variables to match the proposed links shown in @fig-dag.
+
+```{targets titanic_bn_lv1}
+#| label: titanic_bn_lv1
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+set.seed(1)
+
+x <- c_titanic[, c("survived","sibsp","parch","group_size","group_class")]
+n <- 7
+x$LV1 <- factor(sample(1:n,
+                       nrow(x),
+                       replace = TRUE))
+
+bn <- bn.fit(empty.graph(names(x)),
+             x)
+
+cpt <- coef(bn$LV1)
+cpt[1:n] <- rep(1/n, n)
+bn$LV1 <- cpt
+x$LV1 <- factor(rep(NA, nrow(x)),
+                levels = levels(x$LV1))
+
+wl <- data.frame(from = "LV1",
+                 to = c("survived","sibsp","parch"))
+wl <- rbind(wl,
+            data.frame(from = "group_class",
+                       to = c("group_size","LV1")))
+wl <- rbind(wl, data.frame(from="group_size", to=c("sibsp","parch")))
+
+bl <- data.frame(from = c("sibsp","parch","group_size","group_class"),
+                 to = "survived")
+bl <- rbind(bl,
+            data.frame(from = "survived",
+                       to = c("sibsp","parch","group_size","group_class")))
+bl <- rbind(bl,
+            set2blacklist(c("group_class","sibsp","parch")))
+
+bn <- structural.em(x,
+                    start = bn,
+                    return.all = TRUE,
+                    maximize.args = list(whitelist=wl,blacklist=bl),
+                    impute = "bayes-lw",
+                    impute.args = list(n=500))
+
+bn
+```
+
+Build the Bayesian Network `titanic_bn_lv1` latent variable model 1 and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn_lv1)
+```
+
+Trained latent variable Bayesian Network `titanic_bn_lv1` is shown in @fig-bn-lv1.
+
+```{r}
+#| fig.width: 4
+#| fig.height: 2
+#| label: fig-bn-lv1
+#| fig-cap: "Latent Variable LV1 Bayesian Network."
+plot_bn(titanic_bn_lv1$fitted, "fr", highlight="survived")
+```
+
+The cross table of survived by LV1 is shown in @tbl-lv1a (counts) and @tbl-lv1b (Bayesian Network probabilities).
+
+```{r}
+#| label: tbl-lv1a
+#| tbl-cap: "Cross table counts of survived by LV1."
+df <- titanic_bn_lv1$imputed %>%
+  filter(!is.na(c_titanic$survived)) %>%
+  group_by(LV1, survived) %>%
+  tally() %>%
+  tidyr::spread(LV1, n)
+knitr::kable(df)
+```
+
+```{r}
+#| label: tbl-lv1b
+#| tbl-cap: "LV1 Bayesian Network probabilities for LV1 node."
+df <- round(coef(titanic_bn_lv1$fitted$survived), 2) %>%
+  as.data.frame() %>%
+  tidyr::spread(LV1, Freq)
+knitr::kable(df)
+```
+
+## Latent Variable 2 (LV2)
+
+A Bayesian Network (`titanic_bn_lv2`) was trained using the variables survived, age, sex, age_class and a single discrete latent variable LV2. The latent variable 2 is assumed to have three distinct levels or groups. A whitelist and blacklist was used to constrain the connections between variables to match the proposed links shown in @fig-dag.
+
+```{targets titanic_bn_lv2}
+#| label: titanic_bn_lv2
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+set.seed(1)
+
+x <- c_titanic[, c("survived","age","sex","age_class")]
+n <- 3
+x$LV2 <- factor(sample(1:n, nrow(x),
+                       replace = TRUE))
+
+bn <- bn.fit(empty.graph(names(x)),
+             x)
+
+cpt <- coef(bn$LV2)
+cpt[1:n] <- rep(1/n, n)
+bn$LV2 <- cpt
+x$LV2 <- factor(rep(NA, nrow(x)),
+                levels = levels(x$LV2))
+
+wl <- data.frame(from = "LV2",
+                 to = c("survived","age","sex"))
+wl <- rbind(wl,
+            data.frame(from = "age_class",
+                       to = c("age","LV2")))
+
+bl <- data.frame(from = c("age","sex","age_class"),
+                 to = "survived")
+bl <- rbind(bl,
+            data.frame(from = "survived",
+                       to = c("age","sex","age_class")))
+bl <- rbind(bl,
+            set2blacklist(c("age_class","sex")))
+
+bn <- structural.em(x,
+                    start = bn,
+                    return.all = TRUE,
+                    maximize.args = list(whitelist=wl,blacklist=bl),
+                    impute = "bayes-lw",
+                    impute.args = list(n=500))
+
+bn
+```
+
+Build the Bayesian Network `titanic_bn_lv2` latent variable model 2 and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn_lv2)
+```
+
+Trained latent variable Bayesian Network `titanic_bn_lv2` is shown in @fig-bn-lv2.
+
+```{r}
+#| fig.width: 4
+#| fig.height: 2
+#| label: fig-bn-lv2
+#| fig-cap: "Latent Variable LV2 Bayesian Network."
+plot_bn(titanic_bn_lv2$fitted, "fr", highlight="survived")
+```
+
+The cross table of survived by LV2 is shown in @tbl-lv2a (counts) and @tbl-lv2b (Bayesian Network probabilities).
+
+```{r}
+#| label: tbl-lv2a
+#| tbl-cap: "Cross table counts of survived by LV2."
+df <- titanic_bn_lv2$imputed %>%
+  filter(!is.na(c_titanic$survived)) %>%
+  group_by(LV2, survived) %>%
+  tally() %>%
+  tidyr::spread(LV2, n)
+knitr::kable(df)
+```
+
+```{r}
+#| label: tbl-lv2b
+#| tbl-cap: "LV2 Bayesian Network probabilities for LV2 node."
+df <- round(coef(titanic_bn_lv2$fitted$survived), 2) %>%
+  as.data.frame() %>%
+  tidyr::spread(LV2, Freq)
+knitr::kable(df)
+```
+
+## Latent Variable 3 (LV3)
+
+A Bayesian Network (`titanic_bn_lv3`) was trained using the variables survived, pclass, deck, group_class and a single discrete latent variable LV3. The latent variable 3 is assumed to have five distinct levels or groups. A whitelist and blacklist was used to constrain the connections between variables to match the proposed links shown in @fig-dag.
+
+```{targets titanic_bn_lv3}
+#| label: titanic_bn_lv3
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+set.seed(1)
+
+x <- c_titanic[, c("survived","pclass","deck","group_class")]
+n <- 5
+x$LV3 <- factor(sample(1:n,
+                       nrow(x),
+                       replace = TRUE))
+
+bn <- bn.fit(empty.graph(names(x)),
+             x)
+
+cpt <- coef(bn$LV3)
+cpt[1:n] <- rep(1/n, n)
+bn$LV3 <- cpt
+x$LV3 <- factor(rep(NA,
+                    nrow(x)),
+                levels = levels(x$LV3))
+
+wl <- data.frame(from = "LV3",
+                 to = c("survived","pclass","deck","group_class"))
+wl <- rbind(wl,
+            data.frame(from = "deck",
+                       to = "pclass"))
+
+bl <- data.frame(from = c("pclass","deck","group_class"),
+                 to = "survived")
+bl <- rbind(bl,
+            data.frame(from = "survived",
+                       to = c("pclass","deck","group_class")))
+bl <- rbind(bl,
+            data.frame(from = "group_class",
+                       to = c("pclass","deck")))
+
+bn <- structural.em(x,
+                    start = bn,
+                    return.all = TRUE,
+                    maximize.args = list(whitelist=wl,blacklist=bl),
+                    impute = "bayes-lw",
+                    impute.args = list(n=500),
+                    max.iter = 5)
+
+bn
+```
+
+Build the Bayesian Network `titanic_bn_lv3` latent variable model 3 and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn_lv3)
+```
+
+Trained latent variable Bayesian Network `titanic_bn_lv3` is shown in @fig-bn-lv3.
+
+```{r}
+#| fig.width: 4
+#| fig.height: 2
+#| label: fig-bn-lv3
+#| fig-cap: "Latent Variable LV3 Bayesian Network."
+plot_bn(titanic_bn_lv3$fitted, "fr", highlight="survived")
+```
+
+The cross table of survived by LV3 is shown in @tbl-lv3a (counts) and @tbl-lv3b (Bayesian Network probabilities).
+
+```{r}
+#| label: tbl-lv3a
+#| tbl-cap: "Cross table counts of survived by LV3."
+df <- titanic_bn_lv3$imputed %>%
+  filter(!is.na(c_titanic$survived)) %>%
+  group_by(LV3, survived) %>%
+  tally() %>%
+  tidyr::spread(LV3, n)
+knitr::kable(df)
+```
+
+```{r}
+#| label: tbl-lv3b
+#| tbl-cap: "LV3 Bayesian Network probabilities for LV3 node."
+df <- round(coef(titanic_bn_lv3$fitted$survived), 2) %>%
+  as.data.frame() %>%
+  tidyr::spread(LV3, Freq)
+knitr::kable(df)
+```

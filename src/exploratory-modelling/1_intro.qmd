@@ -1,0 +1,79 @@
+---
+format: html-eval-false
+---
+
+> Bayesian Networks are a statistical modelling technique that represents the joint probability between variables. Mixed networks allow modelling of discrete and continuous variables but require that continuous variables are Gaussian and have linear relationships. Neither of which can be gauranteed when performing exploratory modelling. However, despite this restriction the technique can be used for exploratory modeling to gain insight into the data. Later, in modeling the data, any potential non-Gaussian and non-linearity in the data can be accounted for by adding additional variables to the Bayesian Network (Gaussian Mixture Models are great for this). The Titanic dataset is used to showcase the use of Bayesian Networks to focus Exploratory Data Analysis (EDA) on key data features to speed up the analysis. An added bonus is that a Bayesian Network can be trained on data that contain missing values.
+
+# Introduction
+
+On April 10 1912 the newly constructed British luxury passenger liner, the RMS Titanic, departed on its maiden voyage from Southampton in the United Kingdom to New York in the United States of America. The liner first crossed the English channel to Cherbourg France then back to Queenstown in Ireland before heading across the Atlantic Ocean to New York on April 11 1912. Passengers boarded the ship at Southampton, Cherbourg and then Queenstown.
+
+The Titanic never reached its destination.
+
+On April 14 1912, four days after departure, an iceberg was spotted and then struck the Titanic. Approximately two and a half hours after hitting the iceberg, the Titanic sank coming to rest on the ocean seabed at around 3,800m below the ocean surface and approximately 600km south-southeast off the coast of Newfoundland.
+
+Some passengers survived, some did not.
+
+The Kaggle Titanic - Machine Learning from Disaster knowledge competition challenges us to find patterns in the provided data that may help us understand why some passengers survived and others did not. This simple analysis uses the Kaggle Titanic data and is aimed at using Bayesian Networks for exploratory modelling and rapid data understanding.
+
+For this analysis, rather than treating the problem as a prediction problem, I will be treating it as a missing value problem. I will be focusing primarily on exploratory modelling using Bayesian Networks. The idea here is to try and minimize the amount of exploratory data analysis that is done by exploiting Bayesian Networks to zoom in on key data features. Only the important relationships will be explored.
+
+Bayesian Networks assume that numeric variables are continuous and follow a Gaussian distribution and that the relationship between numeric variables are linear. However, a Bayesian Network can still model data with non-Gaussian numeric variables and non-linear relationships. This can be done by converting all variables to factors but at a cost of losing information. Or, alternatively, adding latent discrete variables that deal with the two constraints. In exploratory modelling I will initially ignore these constraints but will endeavor to account for them in later versions of the Bayesian Network model.
+
+## Tools and techniques
+
+The open source R environment for statistical computing was used [@R-base] along with the RStudio Integrated Development Environment and Quarto.
+
+The R packages used for this analysis include `tidyverse` [@R-tidyverse] (data preparation and visualization), `bnlearn` [@R-bnlearn] (training Bayesian Networks), `ggdag` [@R-ggdag] (visualization of directed acyclic graphs), `ggthemes` [@R-ggthemes] (visualization plot themes), `ggmosaic` [@R-ggmosaic] (mosaic plots of cross tabular data), `patchwork` [@R-patchwork] (composition of multiple ggplots), `SEMgraph` [@R-SEMgraph] (visualization of Bayesian Networks), `Amelia` [@R-Amelia] (missing value plot), `RANN` [@R-RANN] (fast nearest neighbour search), `targets` [@R-targets] (pipelines), `knitr` [@R-knitr] (markdown functionality), and `quarto` [@R-quarto] (interface to the Quarto).
+
+```{r}
+#| label: setup
+#| echo: false
+#| output: false
+
+library(tidyverse)
+library(readr)
+library(bnlearn)
+library(ggdag)
+library(ggthemes)
+library(ggmosaic)
+library(patchwork)
+library(SEMgraph)
+library(targets)
+```
+
+The `targets` R package is used to manage the data analytics pipeline. For convenience, the R code used to generate target objects (data or visuals or models) is included in this Quarto markdown report. It is usually better to have all the R code in separate R files (stored in a ./src folder) and included in the `targets` pipeline and the markdown report only including calls to load the artefacts (including plots).
+
+Additional convenience functions were used for reducing code duplication when plotting Bayesian Networks (`plot_bn`) and for adding percentage labels to mosaic plots (`add_percent_label`).
+
+```{r}
+#| file: src/exploratory-modelling/plot_bn.R
+```
+
+```{r}
+#| file: src/exploratory-modelling/add_percent_label.R
+```
+
+Set the `targets` package options. The required packages used by the functions in the pipeline are `dplyr`, `readr`, and `bnlearn`
+
+```{targets globals}
+#| label: globals
+#| tar_globals: true
+#| tar_interactive: false
+#| echo: false
+#| output: false
+
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("dplyr","readr","bnlearn"),
+               error = "null")
+```
+
+To perform a clean build use the functions `tar_unscript` and `tar_prune`.
+
+```{r}
+#| eval: false
+
+# Clean build.
+tar_unscript()
+tar_prune()
+```

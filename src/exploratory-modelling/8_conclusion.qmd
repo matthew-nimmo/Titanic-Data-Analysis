@@ -1,0 +1,11 @@
+---
+format: html-eval-false
+---
+
+# Conclusion
+
+Bayesian Networks were used to explore the Titanic data from the Kaggle Titanic competition. A "final" Bayesian Network was constructed that included three unobserved features (latent variables) that directly effect survival. Latent Variable 1 is connected to survived, parch, sibsp, and group_class and represents group composition (family). Latent Variable 2 is connected to survived, age, age_class, and sex and represents individual characteristics. Latent Variable 3 is connected to survived, deck, passenger class, and group_class and represents the proximity of the passengers cabin to the life boats. The three latent variables account for the relationships between the observed variables and directly effect survival.
+
+Further processing of the ticket variable could be done to better express the composition of the ticket. A group classification could be added to help identify observations that are mother-child, brother-brother, brother-sister, sister-sister, mother-father-2\*child, mother-father-3\*child, mother-father-4*child, group-of-friends, alone, and other. The number of group members that survived could also be added but will need to consider missing survival status.
+
+A synthetic data set was generated from the "final" Bayesian Network which can be used for future classification modelling. The synthetic data will need to be validated to check that the statistics of the original data is replicated. The synthetic data may need to be regenerated to produce a balanced data set for classification modelling.

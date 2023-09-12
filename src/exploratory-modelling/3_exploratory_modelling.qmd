@@ -1,0 +1,927 @@
+---
+format: html-eval-false
+---
+
+::: {.content-visible when-format="html-eval-false"}
+```{r}
+library(tidyverse)
+library(readr)
+library(bnlearn)
+library(ggdag)
+library(ggthemes)
+library(ggmosaic)
+library(patchwork)
+library(SEMgraph)
+library(targets)
+
+source("src/exploratory-modelling/plot_bn.R")
+source("src/exploratory-modelling/add_percent_label.R")
+```
+
+```{r}
+tar_load(b_titanic)
+```
+:::
+
+# Exploratory Modelling and Analysis
+
+## Initial Bayesian Network trained on the pre-processed Titanic data
+
+The observed variables survived, pclass, sex, age, sibsp, parch, embarked, and fare were included in exploratory modelling using Bayesian Networks. The variable passengerid was excluded as this variable only identifies the passenger data (row) which is required for generating the submission file. The variables name and cabin are composite variables and have been excluded. However, two additional variables title and deck were constructed from name and cabin respectively and were included.
+
+To gain insight into the missing value mechanism, additional indicator variables were added to the data identifying missing values.
+
+```{targets titanic_bn0}
+#| label: titanic_bn0
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+flds <- c("survived","title","sex","age","sibsp","parch",
+          "embarked","deck","fare","pclass")
+x <- b_titanic[, flds]
+x[] <- ifelse(is.na(x), 1, 0)
+names(x) <- paste("missing", names(x), sep=".")
+x <- cbind(b_titanic[, flds], x)
+bn <- structural.em(x,
+                    maximize.args = list(whitelist=NULL, blacklist=NULL),
+                    return.all = TRUE,
+                    impute = "parents")
+
+bn
+```
+
+Build the initial Bayesian Network `titanic_bn0` and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn0)
+```
+
+From the Bayesian Network trained with missing value variables included, the missing values for deck, age, and fare are missing at random (@fig-bn0). Missing values for deck are dependent on `r knitr::combine_words(bnlearn::parents(titanic_bn0$fitted, "missing.deck"))`. Missing values for age are dependent on `r knitr::combine_words(bnlearn::parents(titanic_bn0$fitted, "missing.age"))`. And missing values for fare are dependent on `r knitr::combine_words(bnlearn::parents(titanic_bn0$fitted, "missing.fare"))`.
+
+```{r}
+#| fig.width: 6
+#| fig.height: 4
+#| label: fig-bn0
+#| fig-cap: "Initial Bayesian Network with missing value variables."
+plot_bn(titanic_bn0$fitted, dag.layout="kk", highlight="survived")
+```
+
+```{targets titanic_bn1}
+#| label: titanic_bn1
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+flds <- c("survived","title","sex","age","sibsp","parch",
+          "embarked","deck","fare","pclass")
+x <- b_titanic[, flds]
+bn <- structural.em(x,
+                    maximize.args = list(whitelist=NULL, blacklist=NULL),
+                    return.all = TRUE,
+                    impute = "parents")
+
+bn
+```
+
+Build the Bayesian Network `titanic_bn1` without the missing value variables and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn1)
+```
+
+The retrained Bayesian Network (without the missing value variables) suggests surviving the sinking of the Titanic depends on age, sex, pclass, sibsp, and deck (@fig-bn1). The direction of the edges are ignored for now.
+
+Interestingly, deck is not connected to fare or pclass in the Bayesian Network but is linked to survival. It is expected that top decks would be occupied by first class passengers and the lowest decks occupied by third class passengers with the top decks being more expensive than the lower decks. This lack of correlation is likely the result of the large number of missing values in deck and bias in the data. Further processing of the ticket variable could be used to impute some or all of the missing values for deck and fare.
+
+Survival based on what deck you were on is likely the result of crowding during muster. Top decks being closer to the lifeboats would likely result in passengers in cabins on the top decks being at the front of the queue and more likely to get on one of the few lifeboats available. Passengers on the lower decks, third class passengers, would likely be at the back of the queue and likely be stuck on stairs and in corridors inside the cruise liner making it difficult to get to a lifeboat.
+
+The connection between age and pclass is interesting and likely reflects that older passengers are likely to be wealthier and more likely to pay for a better cabin in first or second class. The connection between embarked with sex, and pclass is likely coincidental and could be and indicator of bias in the data. The connection between sex and fare is interesting - do females with children pay more than male passengers without children? Unexpectedly, the variable title is only connected to sex and not connected to age.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 4
+#| label: fig-bn1
+#| fig-cap: "Initial Bayesian Network."
+plot_bn(titanic_bn1$fitted, highlight="survived")
+```
+
+```{r}
+#| eval: false
+#| include: false
+
+cat("Parents of survived:\n")
+bnlearn::parents(titanic_bn1$fitted, "survived")
+
+cat("\nChildren of survived:\n")
+bnlearn::children(titanic_bn1$fitted, "survived")
+
+cat("\nParents of embarked:\n")
+bnlearn::parents(titanic_bn1$fitted, "embarked")
+
+cat("\nChildren of embarked:\n")
+bnlearn::children(titanic_bn1$fitted, "embarked")
+```
+
+## Visual exploratory analysis
+
+Male passengers had a very low chance of survival while females had a very high chance of survival (@fig-mosaic1).
+
+```{r}
+#| fig.width: 5
+#| fig.height: 3
+#| label: fig-mosaic1
+#| fig-cap: "Mosaic plot of survived by sex (Titanic dataset)."
+#| message: false
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(sex)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived, sex),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+```{r}
+#| eval: false
+#| label: tbl-xtab1
+#| tbl-cap: "Cross table counts of sex by survival."
+table(b_titanic$sex, b_titanic$survived)
+```
+
+The box plot of age by title (extracted from name), clearly shows a strong relationship between age and title (@fig-box1). Because of this strong relationship, the connection between title and age will be enforced using a white-list when training the initial Bayesian Network. Title is also strongly related to sex except for the title Dr where it can refer to either a male or female.
+
+```{r}
+#| fig.width: 6
+#| fig.height: 4
+#| label: fig-box1
+#| fig-cap: "Box plot of age by title (Titanic dataset)."
+
+par(mar=c(5.1,5.1,1.1,1.1))
+boxplot(age ~ title,
+        data = b_titanic,
+        horizontal = FALSE,
+        las = 2,
+        pch = 16,
+        xlab = "")
+```
+
+```{r}
+#| eval: false
+#| label: tbl-xtab2
+#| tbl-cap: "Cross table counts of sex by Title."
+table(b_titanic$sex, b_titanic$title)
+```
+
+Passengers in the 15 to 40 age group are more likely to have a sibsp of less than 4 and parch less than 3 while passengers aged over 40 are more likely to have 3 or more parch (@fig-box2). First class passengers are likely to be older adults (median age of around 40), while third class passengers are younger adults (median age of around 25).
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+#| label: fig-box2
+#| fig-cap: "Box plot of sibsp, parch, and pclass by sex (Titanic dataset)."
+
+par(mfcol=c(1,3), mar=c(5.1,5.1,1.1,1.1))
+
+boxplot(age ~ sibsp,
+        data = b_titanic,
+        horizontal = TRUE,
+        las = 2,
+        pch = 16)
+abline(v = c(15,40),
+       col = "red")
+
+boxplot(age ~ parch,
+        data = b_titanic,
+        horizontal = TRUE,
+        las = 2,
+        pch = 16)
+abline(v = 40,
+       col = "red")
+
+boxplot(age ~ pclass,
+        data = b_titanic,
+        horizontal = TRUE,
+        las = 2,
+        pch = 16)
+```
+
+Plotting survived (cumulative) by age highlights five distinct age groups with different rates of survival (@fig-line1). Ages between 0 to 6 (baby, infant) and 15 to 40 (adolescent, young adult) have the highest rates of survival. Being older than 60 (elderly) has a very low chance of survival. Chances of survival decrease with increasing age above 40.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 3
+#| label: fig-line1
+#| fig-cap: "Cumulative plot of survived by age (Titanic dataset)."
+
+x <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(age)) %>%
+  arrange(age) %>%
+  mutate(survived = ifelse(survived == "Yes", 1, 0)) %>%
+  mutate(survived = cumsum(survived))
+ggplot(x,
+       aes(x = age,
+           y = survived)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = c(6,15,40,60),
+             linetype = "dashed",
+             colour = "red") +
+  ylab("survived (cumulative)") +
+  theme_tufte()
+```
+
+Chances for survival if aged less than 6 (Infant) is high at around a 70% chance of survival (@fig-mosaic2). Chances drop to 44% for child age (ages 6 to 15), and to 39% for young adult (ages 15 to 40) and adult (ages 40 to 60). If you were elderly (\>60) then you had a very low chance (23%) of survival.
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic2
+#| fig-cap: "Mosaic plot of survived by age (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(age)) %>%
+  mutate(age = cut(age,
+                   breaks = c(0,6,15,40,60,100),
+                   labels = c("Infant","Child","Young Adult",
+                              "Adult","Elderly"))) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived, age),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+```{r}
+#| eval: false
+#| label: tbl-xtab3
+#| tbl-cap: "Cross table counts of sex by age grouping."
+
+x <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(age)) %>%
+  mutate(age = cut(age,
+                   breaks = c(0,6,15,40,60,100),
+                   labels = c("Infant","Child","Young Adult",
+                              "Adult","Elderly")),
+         survived = ifelse(survived == 1, "Yes", "No"))
+table(x$survived, x$age)
+```
+
+When splitting by sex, we see that there is very little difference in survival rates for the first two age groups (0 to 15) (@fig-line2). But, above the age of 15, survival rates start to diverge for females and males. Females have a higher rate of survival than males. We also see that the age group of 6 to 15 expands to be from age 6 to around age 20 with survival rates slowly lifting from around age 20 to 25.
+
+```{r fig.width=5, fig.height=3}
+#| fig.width: 5
+#| fig.height: 3
+#| label: fig-line2
+#| fig-cap: "Cummulative plot of survived by age split by sex (Titanic dataset)."
+
+x <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(age)) %>%
+  group_by(sex) %>%
+  arrange(sex, age) %>%
+  mutate(survived = ifelse(survived == "Yes", 1, 0)) %>%
+  mutate(survived = cumsum(survived))
+ggplot(x,
+       aes(x = age,
+           y = survived,
+           colour = sex)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = c(6,15,40,60),
+             linetype = "dashed",
+             colour = "black") +
+  ylab("survived (cumulative)") +
+  theme_tufte()
+```
+
+If you were female and were a child aged between 6 to 15 your chances of survival were lower than if you were female of any other age (@fig-mosaic3). If you were male, your chances of survival were slightly better if you were a child (ages 6 to 15) or an infant (ages \<6).
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic3
+#| fig-cap: "Mosaic plot of survived by survived and sex (Titanic dataset)."
+
+x <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(age)) %>%
+  mutate(age = cut(age,
+                   breaks = c(0,6,15,40,60,100),
+                   labels = c("Infant","Child","Young Adult","Adult","Elderly")))
+ggplot(data=x) +
+  geom_mosaic(aes(x = product(survived, age),
+                  filled = survived)) +
+  facet_grid(~sex) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte() +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1))
+```
+
+Passengers with a sibsp of 1 have roughly a 50-50 chance of survival (@fig-mosaic4). Passengers with a sibsp of 3 or 4 have a very low chance of survival (\<25%) while passengers with a sibsp greater than 4 had no chance. For those passengers with no sibsp, the chances of survival were 1 in 3 (35%).
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic4
+#| fig-cap: "Mosaic plot of survived by sibsp (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(sibsp)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived,sibsp),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+```{r}
+#| eval: false
+#| label: tbl-xtab4
+#| tbl-cap: "Cross table counts of survived by sibsp."
+table(b_titanic$survived, b_titanic$sibsp)
+```
+
+First class passengers are more likely to have survived with a 2 in 3 chance of survival (63%), than 2nd and 3rd class passengers (@fig-mosaic5). Survival chances drop to roughly a 50-50 chance for 2nd class passengers while 3rd class passengers are the unlucky lot with only a 1 in 4 chance of survival (24%).
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic5
+#| fig-cap: "Mosaic plot of survived by pclass (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(pclass)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived,pclass),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+```{r}
+#| eval: false
+#| label: tbl-xtab5
+#| tbl-cap: "Cross table counts of survived by pclass."
+table(b_titanic$survived, b_titanic$pclass)
+```
+
+Passengers staying on decks B, D, and E had the highest chances of survival at roughly a 3 in 4 chance of surviving (~75%) (@fig-mosaic6). Passengers on decks A, F, and G, had slightly lower chances of survival with passengers on deck A having the lowest chances of survival (discounting deck T). Why do passengers from the top deck A have the lowest chances of survival? Is is because of sex?
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic6
+#| fig-cap: "Mosaic plot of survived by deck (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(deck)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived,deck),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+```{r}
+#| eval: false
+#| include: false
+#| label: tbl-xtab6
+#| tbl-cap: "Cross table counts of sex by deck."
+table(b_titanic$sex, b_titanic$deck)
+```
+
+Passengers on deck A are mostly male which have a low chance of survival (@fig-mosaic7). Interestingly there are no male passengers listed for deck G in the training data. This is likely to bias any analysis that includes the deck variable.
+
+But if you were male and on Deck E then your chances of surviving were better than if you were male and on any other deck (@fig-mosaic7). If you were male and on deck A then you chances of survival were slightly better than being on decks B, F, and C.
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic7
+#| fig-cap: "Mosaic plot of survived by deck for males (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(survived) & !is.na(deck) & sex=="male") %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived,deck),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values = c("No" = "red",
+                               "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+The indirect association of embarked with survived is through the direct association with sex, sibsp, and pclass which are directly related to survived.
+
+```{r}
+#| eval: false
+#| include: false
+
+cat("Parents of embarked:\n")
+bnlearn::parents(titanic_bn1$fitted, "embarked")
+
+cat("\nChildren of embarked:\n")
+bnlearn::children(titanic_bn1$fitted, "embarked")
+```
+
+Nearly 2/3 rds of the passengers that departed from Southampton (S) and Queenstown (Q) did not survive.
+
+Passengers that embarked from Southampton ("S") have the least chances of survival while those that embarked from Cherbourg ("C") have the highest chances of survival (@fig-mosaic8). Why?
+
+```{r}
+#| fig.width: 6
+#| fig.height: 3
+#| label: fig-mosaic8
+#| fig-cap: "Mosaic plot of survived by embarked (Titanic dataset)."
+
+p <- b_titanic %>%
+  filter(!is.na(embarked) & !is.na(survived)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived,embarked),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values=c("No" = "red",
+                             "Yes" = "grey")) +
+  theme_tufte()
+add_percent_label(p)
+```
+
+Majority of the passengers departing from Queenstown were 3rd class (92%) while most of the passengers departing from Southampton were 3rd class (58%) and male (68%) (@fig-mosaic9). Is this coincidence? Or, is there some hidden feature that explains the significant differences in sex, sibsp, and pclass depending on which port the passenger departed from?
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+#| label: fig-mosaic9
+#| fig-cap: "Mosaic plot of pclass and sex by embarked (Titanic dataset)."
+
+p1 <- b_titanic %>%
+  filter(!is.na(embarked) & !is.na(pclass)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(pclass,embarked),
+                  filled = pclass)) +
+  scale_fill_manual("legend",
+                    values = c("3" = "red",
+                               "2" = "darkgrey",
+                               "1" = "grey")) +
+  theme_tufte() +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1))
+p1 <- add_percent_label(p1)
+
+p2 <- b_titanic %>%
+  filter(!is.na(embarked) & !is.na(sex)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(sex,embarked),
+                  filled = sex)) +
+  scale_fill_manual("legend",
+                    values = c("male" = "red",
+                               "female" = "grey")) +
+  scale_x_discrete(position = "top") +
+  theme_tufte() +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1))
+p2 <- add_percent_label(p)
+
+p1 + p2 + plot_layout(ncol=2)
+```
+
+## Adjust initial Bayesian Network using edge constraints (white and black lists)
+
+Links between variables in Bayesian Networks can be constrained using whitelists and blacklists. Whitelists define the links that must occur in the trained network. Blacklists define links that cannot be included in the trained network. A whitelist is used to ensure that the link between title and age exists in the trained Bayesian Network. A blacklist is used to enforce edges connecting with survived are directed toward survived.
+
+```{targets titanic_bn2}
+#| label: titanic_bn2
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+flds <- c("survived","title","sex","age","sibsp","parch",
+          "embarked","deck","fare","pclass")
+x <- b_titanic[, flds]
+wl <- data.frame(from = "title",
+                 to = "age")
+bl <- bnlearn::tiers2blacklist(list(flds[-1], "survived"))
+bn <- structural.em(x,
+                    maximize.args = list(whitelist=wl, blacklist=bl),
+                    return.all = TRUE,
+                    impute = "parents")
+bn
+```
+
+Build the Bayesian Network `titanic_bn2` with link constraints (whitelist and blacklist) and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn2)
+```
+
+The trained Bayesian Network with the constraint that the variables title and age are linked is shown in @fig-bn2. The consequence of forcing the connection results in the variable age no longer being connected directly to survived. But age is indirectly connected to survived via sibsp and pclass. The only direct effect on survived is sex.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 4
+#| label: fig-bn2
+#| fig-cap: "Bayesian Network (BN2)."
+plot_bn(titanic_bn2$fitted, highlight="survived")
+```
+
+## Process the tickets variable
+
+The ticket variable contains information that groups observations (families) and defines the common values for embarked, cabin or cabins, and fare for those groups. Additionally, the ticket variable could also be used to help determine the composition of the group or family (such as mother and young child, brothers, sisters, alone).
+
+The titanic data is grouped by ticket and then summarized to include the additional variables n_adult, n_child, n_infant, group_size, group_class (derived from group_size), n_decks (as some cabin values are a list of cabins), and unit fare. The unit fare is calculated by dividing the fare by group size for that ticket. Where cabin includes a list of more than 1 cabin (example ticket 695: B51 B53 B55), it is assumed that the group is split across the cabins. However, in the case of a ticket with only one passenger, the multiple cabins listed may be because the passenger changed cabins during the voyage.
+
+Note that some cabins are listed with a prefix of "F ", for example "F G63" (ticket 348121). What does the prefix "F" mean?
+
+```{r}
+#| eval: false
+df <- tar_read(b_titanic) %>%
+  group_by(ticket) %>%
+  summarize(group_size = n(),
+            cabin = paste(unique(cabin), collapse=" ")) %>%
+  filter(str_length(cabin) > 4)
+```
+
+```{targets a_tickets}
+#| label: a_tickets
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- a_titanic
+
+df$fare <- ifelse(is.na(df$fare), 0, df$fare)
+df$cabin <- ifelse(is.na(df$cabin), "", df$cabin)
+df$embarked <- ifelse(is.na(df$embarked), "", as.character(df$embarked))
+
+df$n_adult <- ifelse(df$age>=16, 1, 0)
+df$n_child <- ifelse(df$age>3 & df$age<16, 1, 0)
+df$n_infant <- ifelse(df$age<3, 1, 0)
+
+df <- df %>%
+  group_by(ticket) %>%
+  summarize(group_size = n(),
+            pclass = min(pclass, na.rm=TRUE),
+            fare = max(fare),
+            cabin = paste(unique(cabin), collapse=" "),
+            embarked = paste(unique(embarked), collapse=" "),
+            n_adult = sum(n_adult),
+            n_child = sum(n_child),
+            n_infant = sum(n_infant))
+
+df$group_size <- as.numeric(df$group_size)
+df$group_class <- cut(df$group_size,
+                      breaks = c(0,1,4,6,11),
+                      labels = c("Alone","Small","Medium","Large"))
+
+df$fare <- ifelse(df$fare == 0, NA, df$fare)
+
+df$embarked <- ifelse(df$embarked == "", NA, df$embarked)
+df$embarked <- ifelse(df$embarked == "S C", "C", df$embarked)
+df$embarked <- factor(df$embarked)
+
+df$cabin <- ifelse(df$cabin == "", NA, df$cabin)
+df$cabin <- sub("^ ", "", df$cabin)
+df$n_cabins <- as.numeric(sapply(strsplit(df$cabin, split=" "), length))
+
+df$unit_fare <- df$fare / df$n_cabins
+
+df$deck <- df$cabin
+df$deck <- gsub("[[:digit:]].*", "", df$deck)
+df$deck_f <- ifelse(is.na(df$deck), NA, grepl(" .", df$deck))
+df$deck <- gsub(". ", "", df$deck)
+
+df <- as.data.frame(df)
+df
+```
+
+Build the `a_tickets` data frame and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(a_tickets)
+```
+
+The tickets data `a_tickets` is further processed to select only those observations that have a value for deck, embarked, and fare (unit fare). This data is used for filling in missing values for deck and fare.
+
+```{targets a_ticket_price}
+#| label: a_ticket_price
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+#df <- a_tickets[order(a_tickets$deck,
+#                      a_tickets$embarked),
+#                c("embarked", "deck", "n_cabins", "fare")]
+#df <- df %>%
+#  group_by(embarked, deck, n_cabins) %>%
+#  summarise(fare = median(fare, na.rm=TRUE))
+#df <- df[complete.cases(df), ]
+
+df <- a_tickets[order(a_tickets$deck,
+                      a_tickets$embarked),
+                c("embarked", "deck", "unit_fare")]
+df <- df[complete.cases(df), ]
+df <- df[!duplicated(df), ]
+df
+```
+
+Build the `a_ticket_price` data frame and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(a_ticket_price)
+```
+
+The price of a ticket (fare) is strongly dependent on the number of cabins, deck, and to a less extent embarked (@fig-box3). Interestingly the fare for cabins on Deck A is less than the fare for cabins on Decks B and C and is similar to Decks D and E. Cabins on Deck G have the lowest fare. The ticket price is lowest when embarking from Queenstown, and high when embarking from Cherbourg. Why is embarking from Southampton cheaper than embarking Cherbourg when the journey from Cherbourg is shorter than Southampton?
+
+```{r fig.width=6, fig.height=3}
+#| fig.width: 7
+#| fig.height: 4
+#| label: fig-box3
+#| fig-cap: "Boxplots of fare by embarked, deck, and number of cabins."
+
+par(mfrow=c(1,3), mar=c(5.1,4.1,2.1,1.1))
+
+boxplot(fare ~ embarked,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Embarked",
+        outline = FALSE)
+
+boxplot(fare ~ deck,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Deck",
+        outline = FALSE)
+
+boxplot(fare ~ n_cabins,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Number of Cabins",
+        outline = FALSE)
+```
+
+The price of a ticket (fare) is strongly dependent on the number of adults, children, and infants (@fig-box4). As the number of passengers on a ticket increases, the fare increases. Is this relationship linear? Note that the fare for seven passengers is lower than the median fare for three or more passengers. Is this an error in the data or a discount for such a large group or is the group squeezed into a small number of cabins? 
+
+```{r fig.width=6, fig.height=3}
+#| fig.width: 7
+#| fig.height: 4
+#| label: fig-box4
+#| fig-cap: "Boxplots of fare by number of adults, children, and infants."
+
+par(mfrow=c(1,3), mar=c(5.1,4.1,2.1,1.1))
+
+boxplot(fare ~ n_adult,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Adults",
+        outline = FALSE)
+
+boxplot(fare ~ n_child,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Children",
+        outline = FALSE)
+
+boxplot(fare ~ n_infant,
+        data = a_tickets,
+        horizontal = TRUE,
+        pch = 16,
+        las = 2,
+        main = "Infant",
+        outline = FALSE)
+```
+
+To impute missing values for deck, a simple nearest neighbour estimator was used using the ticket fare. Would it be possible to infer a pricing model from the data? This will be left for a separate data science project.
+
+```{targets b_tickets}
+#| label: b_tickets
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- a_tickets
+i <- is.na(df$deck) & !is.na(df$unit_fare)
+idx <- RANN::nn2(a_ticket_price$unit_fare,
+                 df$unit_fare[i],
+                 k = 1)
+df$deck <- ifelse(i, a_ticket_price$deck[idx$nn.idx], df$deck)
+df$deck <- factor(df$deck,
+                  levels = c("A","B","C","D","E","F","G"))
+df
+```
+
+Build the `b_tickets` data frame with missing values for deck imputed using nearest neighbour, and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(b_tickets)
+```
+
+A Bayesian Network can be trained on the tickets data which could be used for imputing missing values and gaining further insights into the pricing model.
+
+```{targets tickets_bn1}
+#| label: tickets_bn1
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+flds <- c("fare","pclass","embarked","group_size","group_class",
+          "n_adult","n_child","n_infant","n_cabins","unit_fare","deck")
+x <- b_tickets[, flds]
+wl <- data.frame(from = c("deck","embarked"),
+                 to = rep("fare",2))
+bn <- structural.em(x,
+                    maximize.args = list(whitelist=wl, blacklist=NULL),
+                    return.all = TRUE,
+                    impute = "parents")
+bn
+```
+
+Build the Bayesian Network trained on the `b_tickets` data frame and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(tickets_bn1)
+```
+
+The Bayesian Network trained on the tickets data (@fig-bn3) indicates that fare is directly associated with deck, embarked, number of adults, and passenger class. Why is the number of infants, group_class, group_size, and number of cabins connected with passenger class. Passenger class is related to the cabin (deck) and consequently ticket fare, not group size or number of cabins. Although, it is more likely that first class passengers with a large group size will occupy more cabins than third class passengers.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 4
+#| label: fig-bn3
+#| fig-cap: "Bayesian Network (BN3)."
+plot_bn(tickets_bn1$fitted, highlight="survived")
+```
+
+## Add processed tickets data to the Titanic data
+
+The processed tickets data (`b_tickets`) was merged with the processed Titanic data (`b_titanic`) by ticket to generate the `c_titanic` data frame. The variable deck in `b_titanic` was replaced by the values in `b_tickets`. The variables group_size, group_class, n_cabins, unit_fare, deck, n_infant, n_child, and n_adult from the `b_tickets` data were added to the `b_titanic` data.
+
+```{targets c_titanic}
+#| label: c_titanic
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df1 <- b_titanic[, setdiff(names(b_titanic), "deck")]
+
+df2 <- b_tickets
+i <- is.na(df2$deck) & !is.na(df2$unit_fare)
+df2$deck[i] <- tickets_bn1$imputed$deck[i]
+flds <- c("ticket","group_size","group_class","n_cabins",
+          "unit_fare","deck","n_infant","n_child","n_adult")
+df2 <- df2[, flds]
+
+df <- merge(df1, df2, by="ticket")
+i <- !is.na(df$group_class) & df$group_class == "Alone"
+df$n_infant[i] <- 0
+df$n_child[i] <- 0
+df$n_adult[i] <- 1
+
+df
+```
+
+Build the `c_titanic` data frame and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(c_titanic)
+```
+
+## Retrain Bayesian Network with the additional variables from tickets
+
+A Bayesian Network was trained on the `c_titanic` data with the inclusion of the additional variables derived from processing the tickets variable. A whitelist was used to constrain the network to include the links title -> age, deck -> fare, and embarked -> fare.
+
+```{targets titanic_bn3}
+#| label: titanic_bn3
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+flds <- c("survived","title","sex","age","sibsp","parch",
+          "embarked","deck","pclass","fare","unit_fare",
+          "group_size","group_class",
+          "n_cabins","n_infant","n_child","n_adult")
+x <- c_titanic[, flds]
+wl <- data.frame(from = c("title","deck","embarked"),
+                 to = c("age", rep("fare",2)))
+bl <- bnlearn::tiers2blacklist(list(flds[-1], "survived"))
+bn <- structural.em(x,
+                    maximize.args = list(whitelist=wl, blacklist=bl),
+                    return.all = TRUE,
+                    impute = "bayes-lw")
+bn
+```
+
+Build the Bayesian Network `titanic_bn3` with the added variables from the tickets data frame and load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(titanic_bn3)
+```
+
+The Bayesian Network trained on the processed Titanic data `c_titanic` is illustrated as a directed acyclic graph shown in @fig-bn4. Note that survived is now only directly associated with sex and group_class.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 4
+#| label: fig-bn4
+#| fig-cap: "Bayesian Network (BN4)."
+
+plot_bn(titanic_bn3$fitted, "dh", highlight="survived")
+```
+
+The mosaic plot of survived by group_class (@fig-mosaic10) is similar to the mosaic plot of survived by sibsp (@fig-mosaic4). A small group size has the highest chance of survival at almost 60%. All other group sizes have similar chances of survival at around 25%. The high probability of survival for a small group size is likely due to the small groups made up of a mother and child (or infant) being more likely to survive.
+
+```{r}
+#| fig.width: 5
+#| fig.height: 3
+#| label: fig-mosaic10
+#| fig-cap: "Mosaic plot of survived by group_class (processed Titanic dataset)."
+
+p <- c_titanic %>%
+  filter(!is.na(survived) & !is.na(group_class)) %>%
+  ggplot() +
+  geom_mosaic(aes(x = product(survived, group_class),
+                  filled = survived)) +
+  scale_fill_manual("legend",
+                    values=c("No" = "red",
+                             "Yes" = "grey")) +
+  theme_tufte() +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1))
+add_percent_label(p)
+```

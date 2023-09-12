@@ -1,0 +1,7 @@
+project:
+  execute-dir: project
+  output-dir: docs
+  render:
+    - titanic-exploratory-modelling.qmd
+
+editor: source

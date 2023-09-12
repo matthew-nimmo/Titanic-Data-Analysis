@@ -1,0 +1,178 @@
+---
+format: html-eval-false
+---
+
+::: {.content-visible when-format="html-eval-false"}
+```{r}
+#| echo: false
+#| output: false
+library(targets)
+
+source("src/exploratory-modelling/plot_bn.R")
+source("src/exploratory-modelling/add_percent_label.R")
+```
+:::
+
+# The Titanic dataset
+
+The Kaggle Titanic competition dataset consists of two separate comma delimited (CSV) data files - train.csv and test.csv. Both data files were loaded and combined into a single data frame. The variable names were converted to lower case.
+
+## Load the data
+
+Import the train.csv data.
+
+```{targets a_titanic_train}
+#| label: a_titanic_train
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- read_csv("./data/train.csv")
+df <- as.data.frame(df, stringsAsFactors=FALSE)
+names(df) <- tolower(names(df))
+df
+```
+
+Import the test.csv data.
+
+```{targets a_titanic_test}
+#| label: a_titanic_test
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- read_csv("./data/test.csv")
+df <- as.data.frame(df, stringsAsFactors=FALSE)
+names(df) <- tolower(names(df))
+df
+```
+
+Combine the test and train data into a single data frame (a_titanic)
+
+```{targets a_titanic}
+#| label: a_titanic
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- bind_rows(a_titanic_train,
+                a_titanic_test)
+df
+```
+
+Build the data and then load `a_titanic` data frame into memory.
+
+When using `targets` within markdown documents we need to run the `tar_make` function to build the target object and `tar_load` to load the object into memory before the object can be used in the markdown. We do this after every `targets` code block.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(a_titanic)
+```
+
+## Description of the data
+
+The data contains 12 variables of which 7 (passengerid, survived, pclass, age, sibsp, parch, and fare) are numeric and 5 (name, sex, ticket, cabin, and embarked) are discrete character variables. The passengerid variable is not relevant for data analysis and modelling as it is just a row identification number. Of the numeric variables only two, fare and age, appear to be continuous while survived is a binary variable, sibsp and parch are count variables, and pclass a factor.
+
+```{r}
+str(a_titanic)
+```
+
+The variable fare contains a value of zero - this suggests that the passenger had a free ticket. What does a value of 0 for fare represent? These values are assumed, for the moment, to be invalid and are therefore replaced with a missing value.
+
+```{r}
+summary(a_titanic)
+```
+
+The variable pclass contains the unique values: `r knitr::combine_words(unique(a_titanic$pclass))`.
+
+The variable sibsp contains the unique values: `r knitr::combine_words(unique(a_titanic$sibsp))`.
+
+The variable parch contains the unique values: `r knitr::combine_words(unique(a_titanic$parch))`.
+
+The variable embarked contains the unique values: `r knitr::combine_words(unique(a_titanic$embarked))`.
+
+The variable cabin contains `r length(unique(a_titanic$cabin))` values.
+
+```{r}
+#| eval: false
+unique(a_titanic$cabin)
+```
+
+```{r}
+#| include: false
+x <- sapply(strsplit(a_titanic$cabin, " "),
+            length)
+```
+
+The cabin variable is a composite of deck and room number. For some passengers cabin is a list of more than one deck and room number (minimum=`r min(x)`; maximum=`r max(x)`). For these passengers, the list of cabins is assumed to be for groups of passengers that are travelling on the same ticket but are split across multiple cabins.
+
+The name variable is a composite of surname, title, first name, \[middle name\]. The variable surname maybe of use to identify family members who will be in close proximity to each other and will likely move as a group during the event. It is hypothesized that family group and possibly group size may be a factor in predicting survival. It is likely that family name will not be unique. First name and middle name are assumed to have no relationship with survival - why should it? However, title may be of use as it is an identifier of seniority (age) and sex.
+
+The combined data contain 11% missing values (@fig-missing). Majority of the missing values are found in the cabin (and deck), survived, and age variables. A small number of missing values are found in fare (including replaced 0 values) and embarked. It is likely that age could be imputed using a persons title while embarked, deck, and fare could be imputed using ticket.
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+#| label: fig-missing
+#| fig-cap: "Map of the missing values in the Titanic dataset."
+Amelia::missmap(a_titanic,
+                main = "Missingness Map")
+```
+
+## Initial data preparation
+
+The implementation of Bayesian Networks in R in the `bnlearn` package requires that discrete character variables are factors. The variables embarked and sex were converted to factors. The variables pclass, survived, sibsp, and parch are kept as numeric for now but may need to be converted at a later stage in the analysis. Also, a Bayesian Network can be trained using data that contain missing values - there is no need to arbitrarily impute missing values in the training data. The trained Bayesian Network can be used to impute the missing values. Or, alternatively, the training data with all missing values imputed can be returned and used.
+
+```{targets b_titanic}
+#| label: b_titanic
+#| tar_simple: true
+#| tar_interactive: false
+#| output: false
+
+df <- a_titanic
+
+df$title <- sapply(df$name,
+                   \(n) regmatches(n, regexpr("([A-Za-z]+)[.]", n)))
+df$title <- gsub("[.]", "", df$title)
+
+df$deck <- df$cabin
+df$deck <- gsub("[[:digit:]].*", "", df$deck)
+df$deck <- gsub(". ", "", df$deck)
+
+df$fare <- ifelse(!is.na(df$fare) & df$fare == 0, NA, df$fare)
+
+df$age_class <- cut(df$age,
+                    breaks = c(0,1,5,16,40,60,100),
+                    labels = c("baby","infant","child","young adult",
+                               "middle-aged adult","old adult"))
+df$embarked <- factor(df$embarked,
+                      levels = c("S","C","Q"),
+                      labels = c("Southampton","Cherbourg","Queenstown"))
+df$sex <- factor(df$sex)
+df$deck <- factor(df$deck)
+df$title <- factor(df$title)
+df$survived <- factor(df$survived,
+                      levels = c(0,1),
+                      labels = c("No","Yes"))
+#df$sibsp <- factor(df$sibsp)
+#df$parch <- factor(df$parch)
+
+df
+```
+
+Build the `b_titanic` data frame and then load into memory.
+
+```{r}
+#| output: false
+#| message: false
+#| error: false
+if (length(tar_outdated()) > 0) {
+  tar_make()
+}
+tar_load(b_titanic)
+```

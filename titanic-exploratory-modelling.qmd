@@ -1,0 +1,48 @@
+---
+title: "Exploratory Modelling with Bayesian Networks"
+subtitle: "Kaggle Titanic - Machine Learning from Disaster dataset"
+date: "`r strftime(Sys.Date(), '%e %B %Y')`"
+author: "Matthew Nimmo"
+format:
+    pdf:
+      documentclass: article
+      geometry:
+        - top=2.5cm
+        - left=2.5cm
+        - right=2.5cm
+        - bottom=2.5cm
+      fig-pos: "H"
+    html: 
+      self-contained: true
+      grid: 
+        margin-width: 350px
+execute: 
+  echo: fenced
+  message: false
+  warning: false
+  error: false
+  code-overflow: wrap
+fig-cap-location: top
+tbl-cap-location: top
+bibliography: src/exploratory-modelling/references.bib
+---
+
+{{< include src/exploratory-modelling/1_intro.qmd >}}
+
+{{< include src/exploratory-modelling/2_data.qmd >}}
+
+{{< include src/exploratory-modelling/3_exploratory_modelling.qmd >}}
+
+{{< include src/exploratory-modelling/4_stories_of_survival.qmd >}}
+
+{{< include src/exploratory-modelling/5_latent_variable_modelling.qmd >}}
+
+{{< include src/exploratory-modelling/6_final_bn_model.qmd >}}
+
+{{< include src/exploratory-modelling/7_synthetic_data.qmd >}}
+
+{{< include src/exploratory-modelling/8_conclusion.qmd >}}
+
+\newpage
+
+# References
