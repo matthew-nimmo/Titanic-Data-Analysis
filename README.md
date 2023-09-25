@@ -28,8 +28,9 @@ You can download data from [Kaggle](https://www.kaggle.com/competitions/titanic)
 
 ## Built With
 
-* [![Rstudio][Next.js]][Next-url]
-* [![Quarto][React.js]][React-url]
+* Rstudio
+* Quarto
+* R
 
 Required R packages:
 * tidyverse
